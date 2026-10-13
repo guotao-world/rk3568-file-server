@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RK3568 开发板 Web 服务器</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #e8eef1;
+  }
+  .card {
+    background: rgba(255,255,255,0.08);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 16px;
+    padding: 48px 56px;
+    max-width: 640px;
+    width: 90%;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+  }
+  h1 { font-size: 26px; margin-bottom: 8px; letter-spacing: 1px; }
+  .sub { color: #9fb3c8; font-size: 14px; margin-bottom: 32px; }
+  .info { display: grid; grid-template-columns: auto 1fr; gap: 10px 24px; font-size: 15px; }
+  .info dt { color: #7fd1ae; font-weight: 600; }
+  .info dd { color: #e8eef1; }
+  .badge {
+    display: inline-block; margin-top: 28px; padding: 8px 18px;
+    background: #2ecc71; color: #0f2027; border-radius: 20px;
+    font-size: 13px; font-weight: 700;
+  }
+  code {
+    background: rgba(0,0,0,0.35); padding: 2px 8px; border-radius: 6px;
+    font-size: 13px; color: #ffd479;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>RK3568 开发板 Web 服务器</h1>
+    <p class="sub">Nginx 服务运行正常 · 网页目录 /userdata/www</p>
+    <dl class="info">
+      <dt>主机名</dt><dd>ATK-DLRK3568</dd>
+      <dt>处理器</dt><dd>Rockchip RK3568 · 4× Cortex-A55</dd>
+      <dt>内存</dt><dd>4GB</dd>
+      <dt>系统</dt><dd>Buildroot Linux 4.19.232 aarch64</dd>
+      <dt>服务器</dt><dd>Nginx 1.12.2</dd>
+      <dt>访问地址</dt><dd>http://192.168.18.71</dd>
+    </dl>
+    <div class="badge">&#10003; 服务运行中</div>
+    <p style="margin-top:20px; font-size:13px; color:#9fb3c8;">
+      把网页文件放入开发板 <code>/userdata/www</code> 目录，即可通过
+      <code>http://192.168.18.71</code> 访问。
+    </p>
+  </div>
+</body>
+</html>

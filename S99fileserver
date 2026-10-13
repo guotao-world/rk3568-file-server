@@ -1,0 +1,40 @@
+#!/bin/sh
+# RK3568 文件服务器自启脚本
+DAEMON=/userdata/app/file_server.py
+PIDFILE=/var/run/fileserver.pid
+LOGFILE=/userdata/app/fileserver.log
+
+start() {
+    echo "Starting file server..."
+    if [ -f "$PIDFILE" ] && kill -0 $(cat $PIDFILE) 2>/dev/null; then
+        echo "Already running (pid $(cat $PIDFILE))"
+        return
+    fi
+    nohup /usr/bin/python3 -u $DAEMON >> $LOGFILE 2>&1 &
+    echo $! > $PIDFILE
+    sleep 1
+    if kill -0 $(cat $PIDFILE) 2>/dev/null; then
+        echo "Started (pid $(cat $PIDFILE))"
+    else
+        echo "Failed to start, check $LOGFILE"
+    fi
+}
+
+stop() {
+    echo "Stopping file server..."
+    if [ -f "$PIDFILE" ]; then
+        kill $(cat $PIDFILE) 2>/dev/null
+        rm -f $PIDFILE
+        echo "Stopped"
+    else
+        echo "Not running"
+    fi
+}
+
+case "$1" in
+    start) start ;;
+    stop) stop ;;
+    restart) stop; sleep 1; start ;;
+    *) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac
+exit 0
