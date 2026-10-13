@@ -10,6 +10,7 @@ start() {
         echo "Already running (pid $(cat $PIDFILE))"
         return
     fi
+    rotate_log
     nohup /usr/bin/python3 -u $DAEMON >> $LOGFILE 2>&1 &
     echo $! > $PIDFILE
     sleep 1
@@ -17,6 +18,17 @@ start() {
         echo "Started (pid $(cat $PIDFILE))"
     else
         echo "Failed to start, check $LOGFILE"
+    fi
+}
+
+# 日志轮转：超过 1MB 时存档旧日志，最多保留 3 份历史（.1 ~ .3）
+rotate_log() {
+    if [ -f "$LOGFILE" ] && [ $(wc -c < "$LOGFILE") -gt 1048576 ]; then
+        rm -f "$LOGFILE.3"
+        [ -f "$LOGFILE.2" ] && mv "$LOGFILE.2" "$LOGFILE.3"
+        [ -f "$LOGFILE.1" ] && mv "$LOGFILE.1" "$LOGFILE.2"
+        mv "$LOGFILE" "$LOGFILE.1"
+        echo "Log rotated (>1MB), old log kept as $(basename $LOGFILE).1"
     fi
 }
 
