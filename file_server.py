@@ -69,12 +69,22 @@ PAGE_HEAD = """<!DOCTYPE html>
   .crumb a:hover { text-decoration:underline; }
   .crumb .cur { color:#e8eef1; }
   code { background:rgba(0,0,0,0.35); padding:2px 6px; border-radius:6px; font-size:13px; color:#ffd479; }
+  .prog-wrap { display:none; margin-bottom:16px; }
+  .prog-wrap.on { display:block; }
+  .progress { height:8px; background:rgba(255,255,255,0.12); border-radius:4px; overflow:hidden; }
+  .progress .bar { height:100%; width:0%; background:linear-gradient(90deg,#2ecc71,#27ae60);
+                   transition:width .15s; }
+  .progress-label { margin-top:6px; font-size:12px; color:#9fb3c8; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>&#128193; 文件管理器</h1>
   <p class="sub">RK3568 开发板 · 根目录 <code>{ROOT}</code> · 支持目录上传 / 目录打包下载</p>
+  <div class="prog-wrap" id="progWrap">
+    <div class="progress"><div class="bar" id="progBar"></div></div>
+    <div class="progress-label" id="progLabel"></div>
+  </div>
 """
 
 PAGE_TAIL = """
@@ -86,6 +96,51 @@ PAGE_TAIL = """
   var list = document.getElementById('fileList');
   var drop = document.getElementById('drop');
   var pendingFiles = [];   // 待上传列表：{file, path}
+  var progWrap = document.getElementById('progWrap');
+  var progBar = document.getElementById('progBar');
+  var progLabel = document.getElementById('progLabel');
+
+  function showProgress(pct, label){
+    progWrap.className = 'prog-wrap on';
+    progBar.style.width = pct + '%';
+    progLabel.textContent = label;
+  }
+  function hideProgress(){ progWrap.className = 'prog-wrap'; }
+  function fmtBytes(n){
+    if (n < 1024) return n + ' B';
+    if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+    return (n / 1048576).toFixed(1) + ' MB';
+  }
+
+  // 实时速度：每 1 秒采样一次（瞬时窗口速度）；传输不足 1 秒时用平均速度兜底
+  var _spd = 0, _spdB = 0, _spdT = 0, _spdTimer = null;
+  function resetSpeed(){
+    _spd = 0; _spdB = 0; _spdT = 0;
+    if (_spdTimer) { clearInterval(_spdTimer); _spdTimer = null; }
+  }
+  function startSpeed(getBytes, render){
+    resetSpeed();
+    _spdT = Date.now(); _spdB = getBytes();
+    _spdTimer = setInterval(function(){
+      var t = Date.now(), b = getBytes();
+      var dt = (t - _spdT) / 1000;
+      if (dt > 0.05) _spd = (b - _spdB) / dt;
+      _spdB = b; _spdT = t;
+      render();
+    }, 1000);
+    render();
+  }
+  function stopSpeed(){
+    if (_spdTimer) { clearInterval(_spdTimer); _spdTimer = null; }
+  }
+  function finalizeSpeed(finalBytes){
+    // 总时长不足 1 秒：用 总字节/总耗时 作为平均速度补上
+    if (_spd <= 0 && _spdT) {
+      var el = (Date.now() - _spdT) / 1000;
+      if (el > 0) _spd = finalBytes / el;
+    }
+  }
+  function speedText(){ return _spd > 0 ? fmtBytes(_spd) + '/s' : ''; }
 
   drop.addEventListener('click', function(e) {
     if (e.target === fileInput || e.target === dirInput) return;
@@ -171,15 +226,85 @@ PAGE_TAIL = """
     pendingFiles.forEach(function(item){ fd.append('files', item.file, item.path); });
     var btn = document.getElementById('uploadBtn');
     btn.disabled = true; btn.textContent = '上传中...';
+    var upLoaded = 0, upTotal = 0;
+    function renderUp(){
+      if (!upTotal) { showProgress(0, '正在上传 ... 0%（' + fmtBytes(upLoaded) + '，' + speedText() + '）'); return; }
+      var pct = Math.round(upLoaded / upTotal * 100);
+      showProgress(pct, '正在上传 ... ' + pct + '% （' + fmtBytes(upLoaded) + ' / ' + fmtBytes(upTotal) + '，' + speedText() + '）');
+    }
+    startSpeed(function(){ return upLoaded; }, renderUp);
+    showProgress(0, '正在上传 ' + pendingFiles.length + ' 个文件 ...');
     var xhr = new XMLHttpRequest();
     xhr.open('POST', '/upload' + (CURRENT_DIR ? '?dir=' + encodeURIComponent(CURRENT_DIR) : ''), true);
-    xhr.onload = function(){
-      if (xhr.status === 303 || xhr.status === 200) { location.href = '/'; }
-      else { alert('上传失败（HTTP ' + xhr.status + '），请重试'); btn.disabled=false; btn.textContent='&#8593; 开始上传'; }
+    xhr.upload.onprogress = function(e){
+      if (e.lengthComputable) { upLoaded = e.loaded; upTotal = e.total; }
     };
-    xhr.onerror = function(){ alert('上传失败，请检查网络后重试'); btn.disabled=false; btn.textContent='&#8593; 开始上传'; };
+    xhr.onload = function(){
+      if (xhr.status === 303 || xhr.status === 200) {
+        progBar.style.width = '100%';
+        progLabel.textContent = '&#10003; 上传完成，正在刷新列表 ...';
+        setTimeout(function(){ location.href = '/'; }, 800);
+      }
+      else { stopSpeed(); hideProgress(); alert('上传失败（HTTP ' + xhr.status + '），请重试'); btn.disabled=false; btn.textContent='&#8593; 开始上传'; }
+    };
+    xhr.onerror = function(){ stopSpeed(); hideProgress(); alert('上传失败，请检查网络后重试'); btn.disabled=false; btn.textContent='&#8593; 开始上传'; };
     xhr.send(fd);
   }
+
+  // 下载（文件/目录zip）：fetch 流式读取显示进度，完成后触发浏览器保存
+  document.addEventListener('click', function(e) {
+    var el = e.target;
+    while (el && !(el.classList && el.classList.contains('dl'))) el = el.parentNode;
+    if (!el) return;
+    e.preventDefault();
+    var href = el.getAttribute('href');
+    var fname = el.getAttribute('data-file');
+    var type = el.getAttribute('data-type') || 'file';
+    var filename = fname || 'download';
+    showProgress(0, '正在下载 ' + filename + ' ...');
+    fetch(href).then(function(resp){
+      if (!resp.ok) { hideProgress(); alert('下载失败（HTTP ' + resp.status + '）'); return null; }
+      var total = +resp.headers.get('Content-Length') || 0;
+      var received = 0;
+      var chunks = [];
+      var reader = resp.body.getReader();
+      function renderDl(){
+        if (total) {
+          var pct = Math.round(received / total * 100);
+          showProgress(pct, '正在下载 ' + filename + ' ... ' + pct + '% （' + fmtBytes(received) + ' / ' + fmtBytes(total) + '，' + speedText() + '）');
+        } else {
+          showProgress(0, '正在下载 ' + filename + ' ... ' + fmtBytes(received) + '，' + speedText());
+        }
+      }
+      startSpeed(function(){ return received; }, renderDl);
+      function pump(){
+        return reader.read().then(function(r){
+          if (r.done) {
+            finalizeSpeed(received);
+            renderDl();
+            var blob = new Blob(chunks);
+            var a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+            stopSpeed();
+            hideProgress();
+            return;
+          }
+          chunks.push(r.value);
+          received += r.value.length;
+          return pump();
+        });
+      }
+      return pump();
+    }).catch(function(){
+      stopSpeed();
+      hideProgress();
+      alert('下载失败，请检查网络后重试');
+    });
+  });
 
   // 删除（文件或目录）：事件委托，确认后 POST，成功后回当前目录
   document.addEventListener('click', function(e) {
@@ -343,18 +468,18 @@ class Handler(BaseHTTPRequestHandler):
                 parts.append(
                     '<tr><td class="folder">&#128193; <a href="/?dir=%s">%s</a></td>'
                     '<td class="size">-</td><td class="time">-</td>'
-                    '<td><a class="zip" href="/download?file=%s&amp;type=dir">&#128230; 打包下载</a>'
+                    '<td><a class="zip dl" href="/download?file=%s&amp;type=dir" data-file="%s.zip">&#128230; 打包下载</a>'
                     '<a class="del" href="javascript:void(0)" data-name="%s" data-dir="%s" data-type="dir">&#128465; 删除</a></td></tr>'
-                    % (sub_q, name_html, urllib.parse.quote(subdir), data_name, data_dir))
+                    % (sub_q, name_html, urllib.parse.quote(subdir), name_html, data_name, data_dir))
             else:
                 t = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M") if mtime else "-"
                 rel = (cur + "/" + name) if cur else name
                 rel_q = urllib.parse.quote(rel)
                 parts.append(
                     '<tr><td>%s</td><td class="size">%s</td><td class="time">%s</td>'
-                    '<td><a href="/download?file=%s">&#8595; 下载</a>'
+                    '<td><a class="dl" href="/download?file=%s" data-file="%s">&#8595; 下载</a>'
                     '<a class="del" href="javascript:void(0)" data-name="%s" data-dir="%s" data-type="file">&#128465; 删除</a></td></tr>'
-                    % (name_html, fmt_size(size), t, rel_q, data_name, data_dir))
+                    % (name_html, fmt_size(size), t, rel_q, data_name, data_name, data_dir))
         parts.append("</table></div>")
         parts.append(PAGE_TAIL.replace("{CURRENT_DIR}", json.dumps(cur)))
         self._send(200, "".join(parts))
